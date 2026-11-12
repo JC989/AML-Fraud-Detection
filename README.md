@@ -77,3 +77,50 @@ df = kagglehub.load_dataset(
 
 print("First 5 records:", df.head())
 ```
+
+## Project direction
+
+The next phase is AML fraud prediction. Because the data contains accounts and
+transactions, a graph neural network (GNN) may be applicable: accounts can be
+nodes and transfers can be directed, timestamped edges. This must be confirmed
+after inspecting the schemas and labels; a tabular baseline should be built
+first so the graph model has a meaningful comparison.
+
+## Graph ingestion and initial GNN
+
+The graph pipeline treats each bank/account pair as one node and each
+transaction as a directed edge.  The node feature matrix contains sent and
+received counts and amounts, laundering-count, and total degree.  The edge
+index has shape `[2, number_of_transactions]`, with row 0 containing source
+node IDs and row 1 containing destination IDs; edge labels are the transaction
+`Is Laundering` values.
+
+Build and train the initial two-layer mean-aggregation GCN with:
+
+```bash
+python scripts/train_gnn.py /path/to/LI-Small_Trans.csv --epochs 20
+```
+
+The model predicts laundering at the transaction (edge) level.  It uses
+PyTorch directly, so no torch-geometric installation is required.
+
+Run the CLI tests with:
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+## Exploratory data analysis
+
+After downloading the files into a local directory, run the streaming EDA
+report. It does not load the full transaction file into memory:
+
+```bash
+python scripts/explore_dataset.py /path/to/aml-data --output eda.json
+```
+
+The report covers row counts, the duplicated `Account` header, malformed rows,
+missing values, laundering prevalence, categorical distributions, sampled
+amount statistics, timestamp range, and account/bank cardinalities. It also
+records that `LI-Small_Patterns.txt` is structured text and should be parsed
+separately before joining it to transactions.

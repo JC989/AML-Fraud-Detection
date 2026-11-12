@@ -8,10 +8,6 @@ from __future__ import annotations
 
 import argparse
 
-import kagglehub
-from kagglehub import KaggleDatasetAdapter
-
-
 DATASET_HANDLE = "ealtman2019/ibm-transactions-for-anti-money-laundering-aml"
 DATASET_FILES = {
     "patterns": "LI-Small_Patterns.txt",
@@ -22,6 +18,9 @@ DATASET_FILES = {
 
 def load_file(file_path: str):
     """Load one dataset file as a pandas DataFrame through KaggleHub."""
+    import kagglehub
+    from kagglehub import KaggleDatasetAdapter
+
     return kagglehub.load_dataset(
         KaggleDatasetAdapter.PANDAS,
         DATASET_HANDLE,
