@@ -1,4 +1,6 @@
 kagglehub[pandas-datasets]
+duckdb
+torch-geometric
 numpy
 scikit-learn
 torch
