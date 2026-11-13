@@ -6,7 +6,7 @@ import duckdb
 import torch
 from sklearn.preprocessing import StandardScaler
 from torch_geometric.data import Data
-from ml.config import NODES_PATH, EDGES_PATH, PYG_DATA_PATH, NODE_FEATURE_COLS, EDGE_CONTINUOUS_COLS, EDGE_CATEGORICAL_COLS
+from ml.config import NODES_PATH, EDGES_PATH, PYG_DATA_PATH, NODE_FEATURE_COLS, NODE_LOG1P_COLS, EDGE_CONTINUOUS_COLS, EDGE_CATEGORICAL_COLS
 
 
 def main() -> None:
@@ -20,6 +20,11 @@ def main() -> None:
     # DuckDB's NumPy fetch avoids loading the raw CSV or requiring pandas.
     x_raw = np.column_stack([nodes[col] for col in NODE_FEATURE_COLS]).astype(np.float32)
     node_train = (x_raw[:, 0] + x_raw[:, 1]) > 0
+    # Compress heavy tails before scaling; log1p is monotonic, so ranking
+    # information is unchanged and cold-start zeros stay zero.
+    for i, col in enumerate(NODE_FEATURE_COLS):
+        if col in NODE_LOG1P_COLS:
+            x_raw[:, i] = np.log1p(x_raw[:, i])
     # Cold-start nodes have no train behavior; fit only on train-active nodes.
     node_scaler = StandardScaler().fit(x_raw[node_train] if node_train.any() else x_raw)
     x = torch.tensor(node_scaler.transform(x_raw), dtype=torch.float32)

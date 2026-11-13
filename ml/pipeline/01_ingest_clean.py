@@ -43,7 +43,8 @@ def main() -> None:
     con.execute("""CREATE OR REPLACE TEMP TABLE normalized AS SELECT
         trim("From Bank") from_bank, trim("To Bank") to_bank, trim("Account") from_account,
         trim("Account_1") to_account, try_strptime(trim("Timestamp"), '%Y/%m/%d %H:%M') event_time,
-        try_cast("Amount Paid" AS DOUBLE) amount_paid, trim("Payment Currency") payment_currency,
+        try_cast("Amount Paid" AS DOUBLE) amount_paid, try_cast("Amount Received" AS DOUBLE) amount_received,
+        trim("Payment Currency") payment_currency,
         trim("Receiving Currency") receiving_currency, trim("Payment Format") payment_format,
         try_cast("Is Laundering" AS INTEGER) is_laundering FROM raw""")
     count("after header normalization", "normalized")
@@ -55,16 +56,17 @@ def main() -> None:
     print(f"null accounts/timestamps removed: {con.execute('SELECT count(*) FROM normalized') .fetchone()[0] - con.execute('SELECT count(*) FROM valid').fetchone()[0]:,}")
     count("after null filtering", "valid")
     con.execute("""CREATE OR REPLACE TEMP TABLE amounts AS
-        SELECT * FROM valid WHERE amount_paid > 0""")
+        SELECT * FROM valid WHERE amount_paid > 0 AND amount_received > 0""")
     print(f"non-positive amounts removed: {con.execute('SELECT count(*) FROM valid').fetchone()[0] - con.execute('SELECT count(*) FROM amounts').fetchone()[0]:,}")
     count("after amount filtering", "amounts")
     con.execute("""CREATE OR REPLACE TEMP TABLE clean AS SELECT *,
       CAST(epoch(event_time) - min(epoch(event_time)) OVER () AS BIGINT) Timestamp,
-      ln(1.0 + amount_paid) log_amount, sin(2*pi()*hour(event_time)/24.0) hour_sin,
+      ln(1.0 + amount_paid) log_amount, ln(1.0 + amount_received) log_amount_received, sin(2*pi()*hour(event_time)/24.0) hour_sin,
       cos(2*pi()*hour(event_time)/24.0) hour_cos, sin(2*pi()*((dayofweek(event_time)+6)%7)/7.0) dow_sin,
       cos(2*pi()*((dayofweek(event_time)+6)%7)/7.0) dow_cos,
       (payment_currency <> receiving_currency)::INTEGER is_cross_currency,
-      (from_bank <> to_bank)::INTEGER is_cross_bank
+      (from_bank <> to_bank)::INTEGER is_cross_bank,
+      (from_bank = to_bank AND from_account = to_account)::INTEGER is_self_loop
       FROM amounts WHERE payment_currency IS NOT NULL AND receiving_currency IS NOT NULL AND payment_format IS NOT NULL""")
     print(f"null categorical strings removed: {con.execute('SELECT count(*) FROM amounts').fetchone()[0] - con.execute('SELECT count(*) FROM clean').fetchone()[0]:,}")
     count("final cleaned rows", "clean")

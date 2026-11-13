@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 import torch
 
-from ml.config import CLEAN_TX_PATH, NODES_PATH, EDGES_PATH, SPLIT_STATS_PATH, PYG_DATA_PATH, NODE_FEATURE_COLS
+from ml.config import CLEAN_TX_PATH, NODES_PATH, EDGES_PATH, SPLIT_STATS_PATH, PYG_DATA_PATH, NODE_FEATURE_COLS, EDGE_CONTINUOUS_COLS
 
 
 def require(ok: bool, message: str) -> None:
@@ -29,7 +29,7 @@ def main() -> None:
     # repeatedly decompressing the Parquet files.
     print("Loading compact audit projections...", flush=True)
     c.execute(f"""CREATE OR REPLACE TEMP TABLE clean AS SELECT
-        event_time, from_account, to_account, amount_paid, is_laundering,
+        event_time, from_account, to_account, amount_paid, amount_received, is_laundering, is_self_loop,
         Timestamp, hour_sin, hour_cos, dow_sin, dow_cos,
         is_cross_currency, is_cross_bank FROM read_parquet('{CLEAN_TX_PATH}')""")
     c.execute(f"""CREATE OR REPLACE TEMP TABLE nodes AS SELECT node_id, Bank_ID,
@@ -45,6 +45,8 @@ def main() -> None:
     checks = {
         "accounts non-null/non-empty": "from_account IS NOT NULL AND length(trim(from_account)) > 0 AND to_account IS NOT NULL AND length(trim(to_account)) > 0",
         "amount_paid > 0": "amount_paid > 0",
+        "amount_received > 0": "amount_received > 0",
+        "self-loop flag binary": "is_self_loop IN (0,1)",
         "binary non-null laundering labels": "is_laundering IS NOT NULL AND is_laundering IN (0,1)",
         "Timestamp >= 0": "Timestamp >= 0",
         "cyclical features bounded": "hour_sin BETWEEN -1 AND 1 AND hour_cos BETWEEN -1 AND 1 AND dow_sin BETWEEN -1 AND 1 AND dow_cos BETWEEN -1 AND 1",
@@ -84,6 +86,13 @@ def main() -> None:
         a = c.execute(f"SELECT max(Timestamp) FROM edges WHERE split='{left}'").fetchone()[0]; b = c.execute(f"SELECT min(Timestamp) FROM edges WHERE split='{right}'").fetchone()[0]
         require(a is None or b is None or a <= b, f"{left}/{right} chronology overlap")
     print("[PASS] chronological edge order and split boundaries")
+    feats = ' OR '.join(f'{x} IS NULL OR isnan({x}) OR isinf({x})' for x in EDGE_CONTINUOUS_COLS)
+    bad_feat = c.execute(f"SELECT count(*) FROM read_parquet('{EDGES_PATH}') WHERE {feats}").fetchone()[0]
+    require(bad_feat == 0, f"edge features with null/nan/inf: {bad_feat}")
+    timing = "log_gap_src_prev_out >= 0 AND log_gap_src_prev_in >= 0 AND log_gap_dst_prev_in >= 0 AND log_src_out_24h >= 0 AND log_dst_in_24h >= 0"
+    bad_timing = c.execute(f"SELECT count(*) FROM read_parquet('{EDGES_PATH}') WHERE NOT ({timing})").fetchone()[0]
+    require(bad_timing == 0, f"negative relative-timing features: {bad_timing}")
+    print(f"[PASS] {len(EDGE_CONTINUOUS_COLS)} continuous edge features present, finite, timing features non-negative")
     print("\n--- Class breakdown ---")
     print(f"{'scope':<10}{'E':>14}{'legit':>14}{'illicit':>14}{'illicit %':>14}{'neg:pos':>14}")
     for scope in ["train", "val", "test", "overall"]:
@@ -110,6 +119,9 @@ def main() -> None:
     require(bool((sum(masks) == 1).all()), "masks are not mutually exclusive and exhaustive")
     print(f"[PASS] x={tuple(data.x.shape)} {data.x.dtype}; edge_index={tuple(data.edge_index.shape)} {data.edge_index.dtype}; edge_attr={tuple(data.edge_attr.shape)}; y={tuple(data.y.shape)}")
     print(f"[PASS] masks exhaustive/disjoint; finite tensors; endpoints in [0, {n-1}]")
+    max_z = float(data.x.abs().max())
+    require(max_z < 100, f"node features still extremely heavy-tailed: max |z| = {max_z:.0f}")
+    print(f"[PASS] node features tail-compressed: max |z| = {max_z:.1f}")
     source3 = Path("ml/pipeline/03_to_pyg.py").read_text()
     require(
         "edge_scaler = StandardScaler().fit" in source3
