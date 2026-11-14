@@ -6,11 +6,20 @@ not included yet.
 
 ## Setup
 
+For Bash:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
+
+For Powershell:
+```powershell
+python3 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
 
 The pipeline uses the Kaggle IBM AML dataset and downloads
 `HI-Small_Trans.csv` through KaggleHub when it is not already in `data/`.
